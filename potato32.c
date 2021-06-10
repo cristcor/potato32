@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
         struct tubercular_use_entry *tut = 
         (struct tubercular_use_entry *) malloc(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4));
         for(long i = 0; i<(pow(2, ADDRESS_BITS))/4; i++){
-            if(i==0) tut[i].info = 0b00000011;
+            if(i==0) tut[i].info = 0b00111111;
             else tut[i].info = 0b00000000;
         }
 
@@ -76,12 +76,54 @@ int main(int argc, char *argv[])
 
         printf("- Filling root pointers...\n");
         for(long i = 0; i<TUBERCULAR_CONTAINER_HEAD_PTRS; i++){
-            root->files[i] = 0x00000000;
+        	if(i==0) root->files[i] = 0x00000001;
+        	else if (i==1) root->files[i] = 0x00000002;
+        	else root->files[i] = 0x00000000;
         }
 
         root->next = 0x00000000;
 
         fwrite(root, sizeof(struct tubercular_container_head), 1, fp);
+
+        //Test empty dir
+        printf("- Creating test Tubercular Container...\n");
+        struct tubercular_container_head *testdir = (struct tubercular_container_head*) malloc(sizeof(struct tubercular_container_head));
+
+        testdir->pathname[0] = 't';
+        testdir->pathname[1] = 'e';
+        testdir->pathname[2] = 's';
+        testdir->pathname[3] = 't';
+        testdir->pathname[4] = '\0';
+
+        printf("- Filling Tubercular Container pointers...\n");
+        for(long i = 0; i<TUBERCULAR_CONTAINER_HEAD_PTRS; i++){
+        	testdir->files[i] = 0x00000000;
+        }
+
+        testdir->next = 0x00000000;
+
+        fwrite(testdir, sizeof(struct tubercular_container_head), 1, fp);
+
+        //Test empty file
+        printf("- Creating test Potatoe...\n");
+        struct potatoe_head *testfile = (struct potatoe_head*) malloc(sizeof(struct potatoe_head));
+
+        testfile->filename[0] = 'e';
+        testfile->filename[1] = 'm';
+        testfile->filename[2] = 'p';
+        testfile->filename[3] = 't';
+        testfile->filename[4] = 'y';
+        testfile->filename[5] = '\0';
+        testfile->extension[0] = 't';
+        testfile->extension[1] = 'x';
+        testfile->extension[2] = 't';
+        testfile->filesize = 0;
+        testfile->create_time = time(0);
+        testfile->modify_time = time(0);
+        testfile->acces_time = time(0);
+        testfile->next = 0x00000000;
+
+        fwrite(testfile, sizeof(struct potatoe_head), 1, fp);
 
         printf("- Closing...\n");
 
