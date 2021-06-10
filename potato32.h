@@ -100,6 +100,7 @@ struct potato32{
 	char *imagepath;
 	struct tubercular_file_system_information *tfsi;
 	struct tubercular_use_entry *tut;
+	int *file;
 	uid_t st_uid;		//User ID
     gid_t st_gid;		//Group ID
 

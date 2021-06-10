@@ -10,6 +10,84 @@
 
 #include "potato32.h"
 
+//////////////////////////////////////
+//			Core functions			//
+//////////////////////////////////////
+static void *p32_init(struct fuse_conn_info *conn){
+	struct potato32 *data = (struct potato32 *) fuse_get_context()->private_data;
+	return data;
+}
+static void p32_destroy(void *private_data){
+
+}
+
+//////////////////////////////////////
+//			Dir functions			//
+//////////////////////////////////////
+static int p32_mkdir(const char *dir, mode_t mode){
+	return 0;
+}
+static int p32_rmdir(const char *dir){
+	return 0;
+}
+static int p32_readdir(const char *dir, void *buff, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi){
+	return 0;
+}
+
+//////////////////////////////////////
+//			File functions			//
+//////////////////////////////////////
+static int p32_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi){
+	return 0;
+}
+static int p32_open(const char *path, struct fuse_file_info *fi){
+	return 0;
+}
+static int p32_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi){
+	return 0;
+}
+static int p32_unlink(const char *path){
+	return 0;
+}
+static int p32_create(const char *path, mode_t mode, struct fuse_file_info *fi){
+	return 0;
+}
+static int p32_rename(const char *from, const char *to){
+	return 0;
+}
+
+//////////////////////////////////////
+//			Attr functions			//
+//////////////////////////////////////
+static int p32_getattr(const char *path, struct stat *stbuff){
+	return 0;
+}
+
+
+//////////////////////////////////////
+//			Struct functions			//
+//////////////////////////////////////
+static struct fuse_operations fuse_ops = {
+	.init 		=	p32_init,
+	.destroy	=	p32_destroy,
+
+	.mkdir		=	p32_mkdir,
+	.rmdir		=	p32_rmdir,
+	.readdir	=	p32_readdir,
+
+	.read 		=	p32_read,
+	.open 		=	p32_open,
+	.write 		=	p32_write,
+	.unlink 	=	p32_unlink,
+	.create 	=	p32_create,
+	.rename 	=	p32_rename,
+
+	.getattr 	=	p32_getattr,
+	//.setattr 	=	p32_setattr,
+	//.chmod 	=	p32_chmod,
+};
+
+
 int main(int argc, char *argv[])
 {
     struct potato32 *data;
@@ -204,6 +282,8 @@ int main(int argc, char *argv[])
 
     printf("- Starting FUSE\n");
 
+    data->file=fopen(data->imagepath, "w");
+
     //Init fuse
-    //return fuse_main(argc, argv, &basic_oper, potato32);
+    return fuse_main(argc, argv, &fuse_ops, data);
 }
