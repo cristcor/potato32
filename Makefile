@@ -1,5 +1,5 @@
 montaje = punto_montaje
-fichero = image.img
+fichero = blankimage
 
 fuse_flags = -D_FILE_OFFSET_BITS=64 -lfuse -pthread
 

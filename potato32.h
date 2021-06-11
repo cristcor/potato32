@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <time.h>
+#include <stdio.h>
 
 ////////////////////////////////////
 //		DEFINITIONS OF SIZES	  //
@@ -100,11 +101,11 @@ struct potato32{
 	char *imagepath;
 	struct tubercular_file_system_information *tfsi;
 	struct tubercular_use_entry *tut;
-	int *file;
+	FILE *file;
 	uid_t st_uid;		//User ID
     gid_t st_gid;		//Group ID
 
     //Buffer things
     struct tubercular_buffer *buffer[BUFFER_ENTRIES];
-    uint lastFilled;
+    uint lastUsed;
 };

@@ -11,6 +11,61 @@
 #include "potato32.h"
 
 //////////////////////////////////////
+//			Aux functions			//
+//////////////////////////////////////
+static uint8_t *read_tubercular_data(struct potato32 *data, uint32_t dir){
+	int res = 0;
+	//Check buffers
+	for(unsigned i = 0; i<BUFFER_ENTRIES; i++){
+		//If is NULL stop check
+		if(data->buffer[i]==NULL) break;
+		//If is inside that buffer
+		else if(data->buffer[i]->data_dir <= dir && data->buffer[i]->data_dir + (MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES) > dir ){
+			//Return the buffer data + (diference in clusters between desired dir and buffer init)*size of cluster
+			data->lastUsed = i;
+			return data->buffer[i]->data + (dir - data->buffer[i]->data_dir)*BYTES_PER_CLUSTER;
+		}
+	}
+
+	//Check if that position is generated
+	fseek(data->file, 0, SEEK_END); // seek to end of file
+	long int size = ftell(data->file); // get current file pointer
+
+	long int desired = sizeof(struct tubercular_file_system_information)+
+		(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4)+
+		dir*BYTES_PER_CLUSTER);
+
+	//If it is not generated and a few more clusters, generate them
+	if(desired + (MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES)*BYTES_PER_CLUSTER > size){
+		res = fseek(data->file, desired + (MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES)*BYTES_PER_CLUSTER, SEEK_SET);
+	}
+	//Error ocurred with fseek
+	if(res){
+		return NULL;
+	}
+
+	//Fill the next buffer with them
+	fseek(data->file, desired, SEEK_SET);
+
+	//Check next buffer to be filled
+	data->lastUsed+1 == BUFFER_ENTRIES ? data->lastUsed = 0 : data->lastUsed++ ;
+
+	//Initialize that buffer if it has been never used
+	if(data->buffer[data->lastUsed] == NULL){
+		data->buffer[data->lastUsed] = (struct tubercular_buffer*) malloc(sizeof(struct tubercular_buffer));
+	} else {
+		free(data->buffer[data->lastUsed]->data);
+	}
+
+	//Fill the buffer with the data
+	data->buffer[data->lastUsed]->data_dir = dir;
+	fread(data->buffer[data->lastUsed]->data, sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
+
+	//Return data
+	return data->buffer[data->lastUsed]->data;
+}
+
+//////////////////////////////////////
 //			Core functions			//
 //////////////////////////////////////
 static void *p32_init(struct fuse_conn_info *conn){
@@ -93,7 +148,7 @@ int main(int argc, char *argv[])
     struct potato32 *data;
     data=malloc(sizeof(struct potato32) + (sizeof(struct tubercular_use_entry) * ((pow(2, ADDRESS_BITS))/4)-1) );
 
-    struct tubercular_container_head *root;
+    struct tubercular_container_head *root = (struct tubercular_container_head*) malloc(sizeof(struct tubercular_container_head));
 
     //No param or last param is an option
     if ((argc < 1) || (argv[argc-1][0] == '-'))
@@ -218,29 +273,44 @@ int main(int argc, char *argv[])
         //Fill data with data from image
         data->imagepath = strdup(argv[argc-2]);
 
-        printf("- Reading file\n");
-        FILE *fp = fopen(data->imagepath, "w");
+        printf("- Reading file: %s\n", data->imagepath);
+        FILE *fp = fopen(data->imagepath, "r");
 
         //Reading TFSI
         printf("-- Reading Tubercular File System Information\n");
-        if(fread(data->tfsi, sizeof(struct tubercular_file_system_information), (pow(2, ADDRESS_BITS))/4, fp)!=sizeof(struct tubercular_file_system_information)){
-            printf("--- Error reading Tubercular File System Information\n\n");
+        data->tfsi = (struct tubercular_file_system_information*) malloc(sizeof(struct tubercular_file_system_information));
+        unsigned tam = fread(data->tfsi, sizeof(struct tubercular_file_system_information*), 1, fp);
+        if(tam!= sizeof(struct tubercular_file_system_information)){
+            printf("--- Error reading Tubercular File System Information\n");
+            if(feof(fp)) printf("--- End Of File\n");
+            else if(ferror(fp)) printf("--- Error\n");
+            else printf("--- Unknow error\n");
+            printf("--- %d of %lu bytes\n\n", tam, sizeof(struct tubercular_file_system_information));
             return -1;
         }
-        printf("\n");
 
         //Reading TUT
         printf("-- Reading Tubercular Use Table\n");
-        if(fread(data->tut, sizeof(struct tubercular_use_entry), 1, fp)!=sizeof(struct tubercular_use_entry)){
-            printf("--- Error reading first entry of Tubercular Use Table\n\n");
+        data->tut = (struct tubercular_use_entry*) malloc(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4));
+        tam = fread(data->tut, sizeof(struct tubercular_use_entry), (pow(2, ADDRESS_BITS))/4, fp);
+        if(tam!=sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4)){
+            printf("--- Error reading first entry of Tubercular Use Table\n");
+            if(feof(fp)) printf("--- End Of File\n");
+            else if(ferror(fp)) printf("--- Error\n");
+            else printf("--- Unknow error\n");
+            printf("--- %d of %lu bytes\n\n", tam, sizeof(struct tubercular_use_entry));
             return -1;
         }
-        printf("\n");
 
         //Read Root
         printf("-- Reading Root Tubercular Container\n");
-        if(fread(root, sizeof(struct tubercular_container_head), 1, fp)!=sizeof(struct tubercular_container_head)){
-            printf("--- Error reading first Tubercular Data Region (Root)\n\n");
+        tam = fread(root, sizeof(struct tubercular_container_head), 1, fp);
+        if(tam!=sizeof(struct tubercular_container_head)){
+            printf("--- Error reading first Tubercular Data Region (Root\n");
+            if(feof(fp)) printf("--- End Of File\n");
+            else if(ferror(fp)) printf("--- Error\n");
+            else printf("--- Unknow error\n");
+            printf("--- %d of %lu bytes\n\n", tam, sizeof(struct tubercular_container_head));
             return -1;
         }
         printf("\n");
@@ -282,7 +352,7 @@ int main(int argc, char *argv[])
 
     printf("- Starting FUSE\n");
 
-    data->file=fopen(data->imagepath, "w");
+    data->file=fopen(data->imagepath, "rw");
 
     //Init fuse
     return fuse_main(argc, argv, &fuse_ops, data);
