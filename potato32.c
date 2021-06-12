@@ -194,7 +194,7 @@ int main(int argc, char *argv[])
         struct tubercular_use_entry *tut = 
         (struct tubercular_use_entry *) malloc(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4));
         for(long i = 0; i<(pow(2, ADDRESS_BITS))/4; i++){
-            if(i==0) tut[i].info = 0b00111111;
+            if(i==0) tut[i].info = 0b00011111;
             else tut[i].info = 0b00000000;
         }
 
@@ -279,13 +279,14 @@ int main(int argc, char *argv[])
         //Reading TFSI
         printf("-- Reading Tubercular File System Information\n");
         data->tfsi = (struct tubercular_file_system_information*) malloc(sizeof(struct tubercular_file_system_information));
-        unsigned tam = fread(data->tfsi, sizeof(struct tubercular_file_system_information*), 1, fp);
-        if(tam!= sizeof(struct tubercular_file_system_information)){
+        long unsigned tam = fread(data->tfsi, sizeof(struct tubercular_file_system_information*), 1, fp);
+        //printf("--- %lu of %lu bytes\n\n", tam*sizeof(struct tubercular_file_system_information), sizeof(struct tubercular_file_system_information));
+        
+        if(tam!= 1/*sizeof(struct tubercular_file_system_information)*/){
             printf("--- Error reading Tubercular File System Information\n");
             if(feof(fp)) printf("--- End Of File\n");
             else if(ferror(fp)) printf("--- Error\n");
             else printf("--- Unknow error\n");
-            printf("--- %d of %lu bytes\n\n", tam, sizeof(struct tubercular_file_system_information));
             return -1;
         }
 
@@ -293,24 +294,26 @@ int main(int argc, char *argv[])
         printf("-- Reading Tubercular Use Table\n");
         data->tut = (struct tubercular_use_entry*) malloc(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4));
         tam = fread(data->tut, sizeof(struct tubercular_use_entry), (pow(2, ADDRESS_BITS))/4, fp);
-        if(tam!=sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4)){
+        //printf("--- %lu of %d bytes\n\n", tam*sizeof(struct tubercular_use_entry), ((pow(2, ADDRESS_BITS))/4));
+
+        if(tam!=/*sizeof(struct tubercular_use_entry)*/((pow(2, ADDRESS_BITS))/4)){
             printf("--- Error reading first entry of Tubercular Use Table\n");
             if(feof(fp)) printf("--- End Of File\n");
             else if(ferror(fp)) printf("--- Error\n");
             else printf("--- Unknow error\n");
-            printf("--- %d of %lu bytes\n\n", tam, sizeof(struct tubercular_use_entry));
             return -1;
         }
 
         //Read Root
         printf("-- Reading Root Tubercular Container\n");
         tam = fread(root, sizeof(struct tubercular_container_head), 1, fp);
-        if(tam!=sizeof(struct tubercular_container_head)){
+        //printf("--- %lu of %lu bytes\n\n", tam*sizeof(struct tubercular_container_head), sizeof(struct tubercular_container_head));
+
+        if(tam!=1/*sizeof(struct tubercular_container_head)*/){
             printf("--- Error reading first Tubercular Data Region (Root\n");
             if(feof(fp)) printf("--- End Of File\n");
             else if(ferror(fp)) printf("--- Error\n");
             else printf("--- Unknow error\n");
-            printf("--- %d of %lu bytes\n\n", tam, sizeof(struct tubercular_container_head));
             return -1;
         }
         printf("\n");
