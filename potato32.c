@@ -31,9 +31,10 @@ static uint8_t *read_tubercular_data(struct potato32 *data, uint32_t dir){
 	fseek(data->file, 0, SEEK_END); // seek to end of file
 	long int size = ftell(data->file); // get current file pointer
 
-	long int desired = sizeof(struct tubercular_file_system_information)+
-		(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4)+
-		dir*BYTES_PER_CLUSTER);
+	long int tdrstart = sizeof(struct tubercular_file_system_information)+
+		(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4));
+
+	long int desired = tdrstart + dir*BYTES_PER_CLUSTER;
 
 	//If it is not generated and a few more clusters, generate them
 	if(desired + (MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES)*BYTES_PER_CLUSTER > size){
@@ -163,6 +164,8 @@ int main(int argc, char *argv[])
     if(argc<2) mustcreate = 1;
     else if(argv[argc-2][0]=='-' && argv[argc-1][0] != '-') mustcreate = 1;
 
+    long unsigned tam = 0;
+
     if(mustcreate){//No image to load
         printf("- Creating File System image...\n");
         //Size of each part and sum of all of them
@@ -176,6 +179,7 @@ int main(int argc, char *argv[])
         printf("- Allocating image...\n");
         FILE *fp = fopen("blankimage", "w");
         fseek(fp, size , SEEK_SET);
+        fseek(fp, 0, SEEK_SET);
 
         //Fill TFSI
         printf("- Filling TFSI...\n");
@@ -187,7 +191,13 @@ int main(int argc, char *argv[])
         tfsi->number_of_potatoes = 0;
         tfsi->number_of_tubercular_containers = 1;
 
-        fwrite(tfsi, sizeof(struct tubercular_file_system_information), 1, fp);
+        printf("-- Writing TFSI on %lu\n", ftell(fp));
+        tam = fwrite(tfsi, sizeof(struct tubercular_file_system_information), 1, fp);
+
+        if(tam!=1){
+        	printf("-- Error writing TFSI\n");
+        	return -1;
+        }
 
         //Fill TUT
         printf("- Filling TUT...\n");
@@ -198,7 +208,13 @@ int main(int argc, char *argv[])
             else tut[i].info = 0b00000000;
         }
 
-        fwrite(tut, sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4), 1, fp);
+        printf("-- Writing TUT on %lu\n", ftell(fp));
+        tam = fwrite(tut, sizeof(struct tubercular_use_entry), ((pow(2, ADDRESS_BITS))/4), fp);
+        
+        if(tam!=pow(2, ADDRESS_BITS)/4){
+        	printf("-- Error writing TUT\n");
+        	return -1;
+        }
 
         //Fill TDR
         printf("- Initializing the Tubercular Data Region root...\n");
@@ -216,7 +232,13 @@ int main(int argc, char *argv[])
 
         root->next = 0x00000000;
 
-        fwrite(root, sizeof(struct tubercular_container_head), 1, fp);
+        printf("-- Writing root on %lu\n", ftell(fp));
+        tam = fwrite(root, sizeof(struct tubercular_container_head), 1, fp);
+
+        if(tam!=1){
+        	printf("-- Error writing root\n");
+        	return -1;
+        }
 
         //Test empty dir
         printf("- Creating test Tubercular Container...\n");
@@ -235,7 +257,13 @@ int main(int argc, char *argv[])
 
         testdir->next = 0x00000000;
 
-        fwrite(testdir, sizeof(struct tubercular_container_head), 1, fp);
+        printf("-- Writing test directory on %lu\n", ftell(fp));
+        tam = fwrite(testdir, sizeof(struct tubercular_container_head), 1, fp);
+
+        if(tam!=1){
+        	printf("-- Error writing test directory\n");
+        	return -1;
+        }
 
         //Test empty file
         printf("- Creating test Potatoe...\n");
@@ -256,7 +284,13 @@ int main(int argc, char *argv[])
         testfile->acces_time = time(0);
         testfile->next = 0x00000000;
 
-        fwrite(testfile, sizeof(struct potatoe_head), 1, fp);
+        printf("-- Writing test file on %lu\n", ftell(fp));
+        tam = fwrite(testfile, sizeof(struct potatoe_head), 1, fp);
+
+        if(tam!=1){
+        	printf("-- Error writing test potatoe\n");
+        	return -1;
+        }
 
         printf("- Closing...\n");
 
@@ -279,7 +313,7 @@ int main(int argc, char *argv[])
         //Reading TFSI
         printf("-- Reading Tubercular File System Information\n");
         data->tfsi = (struct tubercular_file_system_information*) malloc(sizeof(struct tubercular_file_system_information));
-        long unsigned tam = fread(data->tfsi, sizeof(struct tubercular_file_system_information*), 1, fp);
+        tam = fread(data->tfsi, sizeof(struct tubercular_file_system_information*), 1, fp);
         //printf("--- %lu of %lu bytes\n\n", tam*sizeof(struct tubercular_file_system_information), sizeof(struct tubercular_file_system_information));
         
         if(tam!= 1/*sizeof(struct tubercular_file_system_information)*/){
@@ -342,8 +376,12 @@ int main(int argc, char *argv[])
     //Check if the first Tubercular Data Region is the root
     printf("- Checking root integrity...\n");
 
+    data->file=fopen(data->imagepath, "rw");
+    root = (struct tubercular_container_head*) read_tubercular_data(data, 0);
+
     if(root->pathname[0]!='/' || root->pathname[1]!='\0') {
         printf("-- Incorrect pathname, error\n\n");
+        printf("//%c//\n", root->pathname[0]);
         return -1;
     }
     if(data->tut[0].info & 0b00000011 != 0b00000011){
@@ -354,8 +392,6 @@ int main(int argc, char *argv[])
     printf("-- Integrity checking passed\n\n");
 
     printf("- Starting FUSE\n");
-
-    data->file=fopen(data->imagepath, "rw");
 
     //Init fuse
     return fuse_main(argc, argv, &fuse_ops, data);
