@@ -1,4 +1,4 @@
-montaje = punto_montaje
+montaje = ./punto_montaje
 fichero = blankimage
 
 fuse_flags = -D_FILE_OFFSET_BITS=64 -lfuse -pthread

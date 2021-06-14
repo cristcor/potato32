@@ -66,6 +66,104 @@ static uint8_t *read_tubercular_data(struct potato32 *data, uint32_t dir){
 	return data->buffer[data->lastUsed]->data;
 }
 
+static unsigned its_container(struct potato32 *data, uint32_t dir){
+	uint32_t entry = dir/4;
+	unsigned offset = dir%4;
+
+	struct tubercular_use_entry tue = data->tut[entry];
+	return ((tue.info >> ((offset*2)+1))  & 0x01);
+}
+
+static unsigned get_dir_of_container(struct potato32 *data, const char *dir, uint32_t* result){
+	char delim[] = "/";
+	char *s = strtok((char*)dir, delim);
+
+	uint32_t folder = 0x00000000;
+	struct tubercular_container_head* head = NULL;
+	struct tubercular_container* body = NULL;
+	struct tubercular_container_head* next = NULL;
+
+	unsigned pos = 0;
+	unsigned found;
+
+	while(s!=NULL){
+		//Load folder head
+		fprintf(stderr,"- Looking for %s\n", s);
+		head = (struct tubercular_container_head*) read_tubercular_data(data, folder);
+		found = 0;
+		pos = 0;
+		//Look inside of the head
+		while(pos<TUBERCULAR_CONTAINER_HEAD_PTRS){
+			//Check if not the end
+			if(head->files[pos]==0x00000000){
+				return 1;
+			}
+			//Check if its container
+			if(!its_container(data, head->files[pos])){
+				pos++;
+				continue;
+			}
+			//Load next
+			next = (struct tubercular_container_head*) 
+				read_tubercular_data(data, head->files[pos]);
+			//Check if its the objective
+			if(!strcmp(s, next->pathname)){
+				found = 1;
+				folder = head->files[pos];
+				break;
+			}
+			pos++;
+		}
+		//If not found in head, look through extensions of head
+		if(!found){
+			//If theres not extensions, return NULL
+			if(head->next == 0x00000000){
+				return 1;
+			}
+			//Else look while theres extensions
+			body = (struct tubercular_container*) read_tubercular_data(data, head->next);
+			while(body!=NULL){
+				pos = 0;
+				while(pos<TUBERCULAR_CONTAINER_PTRS){
+					//Check if not the end
+					if(body->files[pos]==0x00000000){
+						return 1;
+					}
+					//Check if its container
+					if(!its_container(data, body->files[pos])){
+						pos++;
+						continue;
+					}
+					next = (struct tubercular_container_head*) 
+						read_tubercular_data(data, body->files[pos]);
+					//Check if its the objective
+					if(!strcmp(s, next->pathname)){
+						found = 1;
+						folder = body->files[pos];
+						break;
+					}
+					pos++;
+				}
+				if(found) break;
+				//Set next body
+				if(body->next==0x00000000){
+					body = NULL;
+				} else {
+					body = (struct tubercular_container*) read_tubercular_data(data, body->next);
+				}
+			}
+		}
+
+		//If still not found, return NULL
+		if(!found){
+			return 1;
+		}
+		s = strtok(NULL, delim);
+	}
+	*result = folder;
+	return 0;
+}
+
 //////////////////////////////////////
 //			Core functions			//
 //////////////////////////////////////
@@ -87,6 +185,73 @@ static int p32_rmdir(const char *dir){
 	return 0;
 }
 static int p32_readdir(const char *dir, void *buff, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi){
+	struct potato32 *data = (struct potato32* ) fuse_get_context()->private_data;
+
+	fprintf(stderr,"- Reading dir %s\n", dir);
+
+	uint32_t mem = 0;
+	if(get_dir_of_container(data, dir, &mem)) return -ENOENT;
+	fprintf(stderr,"-- Found\n");
+
+	struct tubercular_container_head* head = (struct tubercular_container_head*) read_tubercular_data(data, mem);
+	unsigned end = 0;
+
+	//Add head pointers
+	fprintf(stderr,"- Looking inside of %s\n", (char*)&(head->pathname));
+	for(unsigned pos = 0; pos<TUBERCULAR_CONTAINER_HEAD_PTRS && !end; pos++){
+		fprintf(stderr,"-- Mem position 0x%08x\n", head->files[pos]);
+		if(head->files[pos] == 0){
+			fprintf(stderr,"- End of container\n");
+			end = 1;
+		} else {
+			fprintf(stderr,"-- Entry found\n");
+			if(its_container(data, head->files[pos])){
+				struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, head->files[pos]);
+				fprintf(stderr,"- Adding container %s\n", (char*)&(aux->pathname));
+				if(filler(buff, aux->pathname, NULL, 0)!=0) return -ENOMEM;
+			} else {
+				struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, head->files[pos]);
+
+				char* name = (char*) malloc((strlen(aux->filename)+4));
+
+    			strcat(name, aux->filename);
+    			strcat(name, ".");
+    			strcat(name, aux->extension);
+
+				fprintf(stderr,"- Adding file %s\n", (char*)&(aux->filename));
+				if(filler(buff, name, NULL, 0)!=0) return -ENOMEM;
+				free(name);
+			}
+		}
+	}
+
+	//If theres extensions of the folder
+	if(head->next != 0x00000000){
+		struct tubercular_container* body = (struct tubercular_container*) read_tubercular_data(data, head->next);
+		while(body!=NULL){
+			for(unsigned pos = 0; pos<TUBERCULAR_CONTAINER_HEAD_PTRS && !end; pos++){
+				if(head->files[pos]==0x00000000){
+					end = 1;
+				} else {
+					if(its_container(data, head->files[pos])){
+						struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, head->files[pos]);
+						if(filler(buff, aux->pathname, NULL, 0)!=0) return -ENOMEM;
+					} else {
+						struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, head->files[pos]);
+						char* name = (char*) malloc((strlen(aux->filename)+4)*sizeof(char));
+						strcpy(name, (char*)&(aux->filename));
+						strcpy(&name[strlen(name)-4], (char*)&(aux->extension));
+						if(filler(buff, name, NULL, 0)!=0) return -ENOMEM;
+						free(name);
+					}
+				}
+			}
+			if(body->next == 0x00000000) body = NULL;
+			else body = (struct tubercular_container*) read_tubercular_data(data, body->next);
+		}
+	}
+	if(filler(buff, ".", NULL, 0)!=0) return -ENOMEM;
+	if(filler(buff, "..", NULL, 0)!=0) return -ENOMEM;
 	return 0;
 }
 
@@ -115,7 +280,16 @@ static int p32_rename(const char *from, const char *to){
 //////////////////////////////////////
 //			Attr functions			//
 //////////////////////////////////////
-static int p32_getattr(const char *path, struct stat *stbuff){
+static int p32_getattr(const char *path, struct stat *stbuf){
+	stbuf->st_mode = S_IFDIR | 0755;
+    stbuf->st_nlink = 0;
+    stbuf->st_size = 0;
+    stbuf->st_blocks = 0;
+    stbuf->st_uid = 0;
+    stbuf->st_gid = 0;
+    stbuf->st_atime = 0;
+    stbuf->st_mtime = 0;
+    stbuf->st_ctime = 0;
 	return 0;
 }
 
@@ -125,18 +299,18 @@ static int p32_getattr(const char *path, struct stat *stbuff){
 //////////////////////////////////////
 static struct fuse_operations fuse_ops = {
 	.init 		=	p32_init,
-	.destroy	=	p32_destroy,
+	//.destroy	=	p32_destroy,
 
-	.mkdir		=	p32_mkdir,
-	.rmdir		=	p32_rmdir,
+	//.mkdir		=	p32_mkdir,
+	//.rmdir		=	p32_rmdir,
 	.readdir	=	p32_readdir,
 
-	.read 		=	p32_read,
-	.open 		=	p32_open,
-	.write 		=	p32_write,
-	.unlink 	=	p32_unlink,
-	.create 	=	p32_create,
-	.rename 	=	p32_rename,
+	//.read 		=	p32_read,
+	//.open 		=	p32_open,
+	//.write 		=	p32_write,
+	//.unlink 	=	p32_unlink,
+	//.create 	=	p32_create,
+	//.rename 	=	p32_rename,
 
 	.getattr 	=	p32_getattr,
 	//.setattr 	=	p32_setattr,
@@ -150,6 +324,13 @@ int main(int argc, char *argv[])
     data=malloc(sizeof(struct potato32) + (sizeof(struct tubercular_use_entry) * ((pow(2, ADDRESS_BITS))/4)-1) );
 
     struct tubercular_container_head *root = (struct tubercular_container_head*) malloc(sizeof(struct tubercular_container_head));
+
+    printf("All sizes must be %d\n", BYTES_PER_CLUSTER);
+    printf("Sizes:\n");
+    printf("\tTubercular Container Head: \t%lu\n", sizeof(struct tubercular_container_head));
+    printf("\tTubercular Container: \t\t%lu\n", sizeof(struct tubercular_container));
+    printf("\tPotatoe Head: \t\t\t%lu\n", sizeof(struct potatoe_head));
+    printf("\tPotatoe: \t\t\t%lu\n\n", sizeof(struct potatoe_head));
 
     //No param or last param is an option
     if ((argc < 1) || (argv[argc-1][0] == '-'))
@@ -186,10 +367,10 @@ int main(int argc, char *argv[])
         struct tubercular_file_system_information *tfsi = 
         (struct tubercular_file_system_information *) malloc(sizeof(struct tubercular_file_system_information));
 
-        tfsi->free_tubercular_regions = (pow(2, ADDRESS_BITS))-1;
-        tfsi->first_free_tubercular_region = 1;
-        tfsi->number_of_potatoes = 0;
-        tfsi->number_of_tubercular_containers = 1;
+        tfsi->free_tubercular_regions = (pow(2, ADDRESS_BITS))-3;
+        tfsi->first_free_tubercular_region = 3;
+        tfsi->number_of_potatoes = 1;
+        tfsi->number_of_tubercular_containers = 2;
 
         printf("-- Writing TFSI on %lu\n", ftell(fp));
         tam = fwrite(tfsi, sizeof(struct tubercular_file_system_information), 1, fp);
@@ -224,10 +405,10 @@ int main(int argc, char *argv[])
         root->pathname[1] = '\0';
 
         printf("- Filling root pointers...\n");
-        for(long i = 0; i<TUBERCULAR_CONTAINER_HEAD_PTRS; i++){
-        	if(i==0) root->files[i] = 0x00000001;
-        	else if (i==1) root->files[i] = 0x00000002;
-        	else root->files[i] = 0x00000000;
+        root->files[0] = (uint32_t) 0x00000001;
+        root->files[1] = (uint32_t) 0x00000002;
+        for(long i = 2; i<TUBERCULAR_CONTAINER_HEAD_PTRS; i++){
+        	root->files[i] = (uint32_t) 0x00000000;
         }
 
         root->next = 0x00000000;
@@ -387,6 +568,21 @@ int main(int argc, char *argv[])
     if(data->tut[0].info & 0b00000011 != 0b00000011){
         printf("-- Incorrect TUT entry, error\n\n");
         return -1;
+    }
+
+    printf("- Checking root integrity again...\n");
+    root = (struct tubercular_container_head*)read_tubercular_data(data, 0x00000000);
+    if(root->pathname[0]!='/' || root->pathname[1]!='\0') {
+        printf("-- Incorrect pathname, error\n\n");
+        printf("//%c//\n", root->pathname[0]);
+        return -1;
+    }
+    
+    if(root->files[0] != 0x00000001 || root->files[1] != 0x00000002){
+    	printf("-- Pointer 1: %lu\n", root->files[0]);
+    	printf("-- Pointer 2: %lu\n", root->files[1]);
+    	printf("-- Incorrect pointers, error\n\n");
+    	return -1;
     }
 
     printf("-- Integrity checking passed\n\n");
