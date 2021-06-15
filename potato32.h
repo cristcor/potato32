@@ -104,6 +104,7 @@ struct potato32{
 	FILE *file;
 	uid_t st_uid;		//User ID
     gid_t st_gid;		//Group ID
+    time_t time;
 
     //Buffer things
     struct tubercular_buffer *buffer[BUFFER_ENTRIES];

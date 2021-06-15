@@ -75,6 +75,14 @@ static unsigned its_container(struct potato32 *data, uint32_t dir){
 }
 
 static unsigned get_dir_of_container(struct potato32 *data, const char *dir, uint32_t* result){
+	fprintf(stderr, "- Looking for container %s\n", dir);
+	if(strcmp(dir, "/")==0){
+		fprintf(stderr, "-- Looking for root direction\n");
+		*result = 0x00000000;
+		return 0;
+	}
+
+
 	char delim[] = "/";
 	char *s = strtok((char*)dir, delim);
 
@@ -88,7 +96,7 @@ static unsigned get_dir_of_container(struct potato32 *data, const char *dir, uin
 
 	while(s!=NULL){
 		//Load folder head
-		fprintf(stderr,"- Looking for %s\n", s);
+		//fprintf(stderr,"- Looking for %s\n", s);
 		head = (struct tubercular_container_head*) read_tubercular_data(data, folder);
 		found = 0;
 		pos = 0;
@@ -207,18 +215,18 @@ static int p32_readdir(const char *dir, void *buff, fuse_fill_dir_t filler, off_
 			fprintf(stderr,"-- Entry found\n");
 			if(its_container(data, head->files[pos])){
 				struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, head->files[pos]);
-				fprintf(stderr,"- Adding container %s\n", (char*)&(aux->pathname));
+				fprintf(stderr,"--- Adding container %s\n", (char*)&(aux->pathname));
 				if(filler(buff, aux->pathname, NULL, 0)!=0) return -ENOMEM;
 			} else {
 				struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, head->files[pos]);
 
 				char* name = (char*) malloc((strlen(aux->filename)+4));
 
-    			strcat(name, aux->filename);
-    			strcat(name, ".");
-    			strcat(name, aux->extension);
+    			strcpy(name, aux->filename);
+    			strcpy(&name[strlen(aux->filename)], ".");
+    			strcpy(&name[strlen(aux->filename)+1], aux->extension);
 
-				fprintf(stderr,"- Adding file %s\n", (char*)&(aux->filename));
+				fprintf(stderr,"--- Adding file %s\n", name);
 				if(filler(buff, name, NULL, 0)!=0) return -ENOMEM;
 				free(name);
 			}
@@ -281,15 +289,182 @@ static int p32_rename(const char *from, const char *to){
 //			Attr functions			//
 //////////////////////////////////////
 static int p32_getattr(const char *path, struct stat *stbuf){
-	stbuf->st_mode = S_IFDIR | 0755;
-    stbuf->st_nlink = 0;
-    stbuf->st_size = 0;
-    stbuf->st_blocks = 0;
-    stbuf->st_uid = 0;
-    stbuf->st_gid = 0;
-    stbuf->st_atime = 0;
-    stbuf->st_mtime = 0;
-    stbuf->st_ctime = 0;
+	struct potato32 *data = (struct potato32* ) fuse_get_context()->private_data;
+	fprintf(stderr, "- Getting attributes of %s\n", path);
+	//If its root
+	if(strcmp(path, "/")==0){
+		fprintf(stderr, "-- Its root\n");
+		//Fill stat
+		struct tubercular_container_head* head = (struct tubercular_container_head*) read_tubercular_data(data, 0x00000000);
+		stbuf->st_mode = S_IFDIR | 0755;
+		stbuf->st_nlink = 0;
+
+
+    	off_t size = 1;
+    	uint32_t next = head->next;
+    	struct tubercular_container* body;
+
+    	while(next != 0x00000000){
+    		size++;
+    		body = (struct tubercular_container*) read_tubercular_data(data, next);
+    		next = body-> next;
+    	}
+
+    	stbuf->st_size = size*BYTES_PER_CLUSTER;
+    	stbuf->st_blocks = size;
+    	stbuf->st_uid = data->st_uid;
+    	stbuf->st_gid = data->st_gid;
+    	stbuf->st_atime = data->time;
+    	stbuf->st_mtime = data->time;
+    	stbuf->st_ctime = data->time;
+
+    	return 0;
+	}
+
+	//Get path of previous folder
+	int index = strlen(path)-1;
+	while(index>=0 && path[index]!='/') index--;
+	if(index == -1) return -ENOENT;
+	char* fold = (char*) malloc((index+1)*sizeof(char));
+	strncpy(fold, path, index+1);
+	fprintf(stderr, "- Containing folder is %s\n", fold);
+	//Get that folder
+	fprintf(stderr, "- Getting memory address\n");
+	uint32_t dir = 0;
+	if(get_dir_of_container(data, fold, &dir)) return -ENOENT;
+	fprintf(stderr, "- Got %lu\n", dir);
+	struct tubercular_container_head* prev = (struct tubercular_container_head*) read_tubercular_data(data, dir);
+
+	//Look in head
+	fprintf(stderr, "- Looking inside head\n");
+	unsigned found = 0;
+	dir = 0;
+	for(int i = 0; i<TUBERCULAR_CONTAINER_HEAD_PTRS && !found; i++){
+		//If its empty return enoent
+		if(prev->files[i]==0x00000000) return -ENOENT;
+
+		//Check name
+		if(its_container(data, prev->files[i])){	//If container
+			struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, prev->files[i]);
+
+    		fprintf(stderr, "-- Checking folder %s\n", aux->pathname);
+			//If its
+			if(strcmp(&(path[index+1]), aux->pathname)==0){
+				dir = prev->files[i];
+				found = 1;
+			}
+		} else {			//If file
+			struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, prev->files[i]);
+
+			char* name = (char*) malloc((strlen(aux->filename)+3));
+
+    		strcpy(name, aux->filename);
+    		strcpy(&name[strlen(aux->filename)], ".");
+    		strcpy(&name[strlen(aux->filename)+1], aux->extension);
+			//If its
+			fprintf(stderr, "-- Comparing %s & %s \n", &(path[index+1]), name);
+			if(strcmp(&(path[index+1]), name) == 0){
+				fprintf(stderr, "-- Are equals\n");
+				dir = prev->files[i];
+				found = 1;
+				break;
+			}
+		}
+	}
+
+	//If not found look in extensions
+	fprintf(stderr, "- Looking inside bodies\n");
+	if(!found && prev->next != 0x00000000){
+		struct tubercular_container* cont = (struct tubercular_container*) read_tubercular_data(data, prev->next);
+		while(cont!=NULL && !found){
+			//Iterate
+			for(int i = 0; i<TUBERCULAR_CONTAINER_PTRS && !found; i++){
+				//If its empty return enoent
+				if(cont->files[i]==0x00000000) return -ENOENT;
+
+				//Check name
+				if(its_container(data, cont->files[i])){	//If container
+					struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, cont->files[i]);
+					//If its
+					if(strcmp(&(path[index+1]), aux->pathname)==0){
+						dir = cont->files[i];
+						found = 1;
+					}
+				} else {			//If file
+					struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, cont->files[i]);
+
+					char* name = (char*) malloc((strlen(aux->filename)+4));
+
+		    		strcat(name, aux->filename);
+		    		strcat(name, ".");
+		    		strcat(name, aux->extension);
+
+					//If its
+					if(strcmp(&(path[index+1]), name)){
+						dir = cont->files[i];
+						found = 1;
+					}
+				}
+			}
+			if(cont->next!=0x00000000){
+				cont = (struct tubercular_container*) read_tubercular_data(data, cont->next);
+			} else {
+				cont = NULL;
+			}
+		}
+	}
+	if(!found) return -ENOENT;
+
+	fprintf(stderr, "- Retrieving data from that memory address\n");
+	if(its_container(data, dir)){
+		//Fill stat
+		struct tubercular_container_head* head = (struct tubercular_container_head*) read_tubercular_data(data, dir);
+		stbuf->st_mode = S_IFDIR | 0755;
+		stbuf->st_nlink = 0;
+
+
+    	off_t size = 1;
+    	uint32_t next = head->next;
+    	struct tubercular_container* body;
+
+    	while(next != 0x00000000){
+    		size++;
+    		body = (struct tubercular_container*) read_tubercular_data(data, next);
+    		next = body-> next;
+    	}
+
+    	stbuf->st_size = size*BYTES_PER_CLUSTER;
+    	stbuf->st_blocks = size;
+    	stbuf->st_uid = data->st_uid;
+    	stbuf->st_gid = data->st_gid;
+    	stbuf->st_atime = data->time;
+    	stbuf->st_mtime = data->time;
+    	stbuf->st_ctime = data->time;
+
+	} else {
+		struct potatoe_head* phead = (struct potatoe_head*) read_tubercular_data(data, dir);
+		stbuf->st_mode = S_IFREG | 0755;
+    	stbuf->st_nlink = 0;
+    	stbuf->st_size = phead->filesize;
+
+    	blksize_t blk = 1;
+    	uint32_t next = phead->next;
+    	struct potatoe* body;
+
+    	while(next != 0x00000000){
+    		blk++;
+    		body = (struct potatoe*) read_tubercular_data(data, next);
+    		next = body-> next;
+    	}
+
+    	stbuf->st_blocks = blk;
+    	stbuf->st_uid = data->st_uid;
+    	stbuf->st_gid = data->st_gid;
+    	stbuf->st_atime = phead->acces_time;
+    	stbuf->st_mtime = phead->modify_time;
+    	stbuf->st_ctime = phead->create_time;
+	}
+
 	return 0;
 }
 
@@ -554,10 +729,12 @@ int main(int argc, char *argv[])
     printf("-- Number of Potatoes: %d\n", data->tfsi->number_of_potatoes);
     printf("-- Number of Tubercular Containers: %d\n\n", data->tfsi->number_of_tubercular_containers);
 
+    data->file=fopen(data->imagepath, "rw");
+    data->time = time(0);
+
     //Check if the first Tubercular Data Region is the root
     printf("- Checking root integrity...\n");
 
-    data->file=fopen(data->imagepath, "rw");
     root = (struct tubercular_container_head*) read_tubercular_data(data, 0);
 
     if(root->pathname[0]!='/' || root->pathname[1]!='\0') {
