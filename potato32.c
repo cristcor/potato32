@@ -74,6 +74,14 @@ static unsigned its_container(struct potato32 *data, uint32_t dir){
 	return ((tue.info >> ((offset*2)+1))  & 0x01);
 }
 
+static unsigned its_empty(struct potato32 *data, uint32_t dir){
+	uint32_t entry = dir/4;
+	unsigned offset = dir%4;
+
+	struct tubercular_use_entry tue = data->tut[entry];
+	return !((tue.info >> ((offset*2)))  & 0x01);
+}
+
 static unsigned get_dir_of_container(struct potato32 *data, const char *dir, uint32_t* result){
 	fprintf(stderr, "- Looking for container %s\n", dir);
 	if(strcmp(dir, "/")==0){
@@ -172,11 +180,100 @@ static unsigned get_dir_of_container(struct potato32 *data, const char *dir, uin
 	return 0;
 }
 
+static unsigned look_inside_for(struct potato32 *data, const char *lfname, const uint32_t folder, uint32_t* result){
+	struct tubercular_container_head* prev = (struct tubercular_container_head*) read_tubercular_data(data, folder);
+
+	//Look in head
+	fprintf(stderr, "- Looking inside head\n");
+	unsigned found = 0;
+	uint32_t dir = 0;
+	for(int i = 0; i<TUBERCULAR_CONTAINER_HEAD_PTRS && !found; i++){
+		//If its empty return enoent
+		if(prev->files[i]==0x00000000) return 1;
+
+		//Check name
+		if(its_container(data, prev->files[i])){	//If container
+			struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, prev->files[i]);
+
+    		fprintf(stderr, "-- Checking folder %s\n", aux->pathname);
+			//If its
+			if(strcmp(lfname, aux->pathname)==0){
+				dir = prev->files[i];
+				found = 1;
+			}
+		} else {			//If file
+			struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, prev->files[i]);
+
+			char* name = (char*) malloc((strlen(aux->filename)+3));
+
+    		strcpy(name, aux->filename);
+    		strcpy(&name[strlen(aux->filename)], ".");
+    		strcpy(&name[strlen(aux->filename)+1], aux->extension);
+			//If its
+			fprintf(stderr, "-- Comparing %s & %s \n", lfname, name);
+			if(strcmp(lfname, name) == 0){
+				fprintf(stderr, "-- Are equals\n");
+				dir = prev->files[i];
+				found = 1;
+				break;
+			}
+		}
+	}
+
+	//If not found look in extensions
+	fprintf(stderr, "- Looking inside bodies\n");
+	if(!found && prev->next != 0x00000000){
+		struct tubercular_container* cont = (struct tubercular_container*) read_tubercular_data(data, prev->next);
+		while(cont!=NULL && !found){
+			//Iterate
+			for(int i = 0; i<TUBERCULAR_CONTAINER_PTRS && !found; i++){
+				//If its empty return enoent
+				if(cont->files[i]==0x00000000) return -ENOENT;
+
+				//Check name
+				if(its_container(data, cont->files[i])){	//If container
+					struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, cont->files[i]);
+					//If its
+					if(strcmp(lfname, aux->pathname)==0){
+						dir = cont->files[i];
+						found = 1;
+					}
+				} else {			//If file
+					struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, cont->files[i]);
+
+					char* name = (char*) malloc((strlen(aux->filename)+4));
+
+		    		strcat(name, aux->filename);
+		    		strcat(name, ".");
+		    		strcat(name, aux->extension);
+
+					//If its
+					if(strcmp(lfname, name)){
+						dir = cont->files[i];
+						found = 1;
+					}
+				}
+			}
+			if(cont->next!=0x00000000){
+				cont = (struct tubercular_container*) read_tubercular_data(data, cont->next);
+			} else {
+				cont = NULL;
+			}
+		}
+	}
+	if(!found) return 1;
+
+	*result = dir;
+
+	return 0;
+}
+
 //////////////////////////////////////
 //			Core functions			//
 //////////////////////////////////////
 static void *p32_init(struct fuse_conn_info *conn){
 	struct potato32 *data = (struct potato32 *) fuse_get_context()->private_data;
+
 	return data;
 }
 static void p32_destroy(void *private_data){
@@ -279,6 +376,7 @@ static int p32_unlink(const char *path){
 	return 0;
 }
 static int p32_create(const char *path, mode_t mode, struct fuse_file_info *fi){
+
 	return 0;
 }
 static int p32_rename(const char *from, const char *to){
@@ -382,7 +480,87 @@ static int p32_getattr(const char *path, struct stat *stbuf){
 				//If its empty return enoent
 				if(cont->files[i]==0x00000000) return -ENOENT;
 
+				//Check namestruct tubercular_container_head* prev = (struct tubercular_container_head*) read_tubercular_data(data, dir);
+
+	//Look in head
+	fprintf(stderr, "- Looking inside head\n");
+	unsigned found = 0;
+	dir = 0;
+	for(int i = 0; i<TUBERCULAR_CONTAINER_HEAD_PTRS && !found; i++){
+		//If its empty return enoent
+		if(prev->files[i]==0x00000000) return -ENOENT;
+
+		//Check name
+		if(its_container(data, prev->files[i])){	//If container
+			struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, prev->files[i]);
+
+    		fprintf(stderr, "-- Checking folder %s\n", aux->pathname);
+			//If its
+			if(strcmp(&(path[index+1]), aux->pathname)==0){
+				dir = prev->files[i];
+				found = 1;
+			}
+		} else {			//If file
+			struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, prev->files[i]);
+
+			char* name = (char*) malloc((strlen(aux->filename)+3));
+
+    		strcpy(name, aux->filename);
+    		strcpy(&name[strlen(aux->filename)], ".");
+    		strcpy(&name[strlen(aux->filename)+1], aux->extension);
+			//If its
+			fprintf(stderr, "-- Comparing %s & %s \n", &(path[index+1]), name);
+			if(strcmp(&(path[index+1]), name) == 0){
+				fprintf(stderr, "-- Are equals\n");
+				dir = prev->files[i];
+				found = 1;
+				break;
+			}
+		}
+	}
+
+	//If not found look in extensions
+	fprintf(stderr, "- Looking inside bodies\n");
+	if(!found && prev->next != 0x00000000){
+		struct tubercular_container* cont = (struct tubercular_container*) read_tubercular_data(data, prev->next);
+		while(cont!=NULL && !found){
+			//Iterate
+			for(int i = 0; i<TUBERCULAR_CONTAINER_PTRS && !found; i++){
+				//If its empty return enoent
+				if(cont->files[i]==0x00000000) return -ENOENT;
+
 				//Check name
+				if(its_container(data, cont->files[i])){	//If container
+					struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, cont->files[i]);
+					//If its
+					if(strcmp(&(path[index+1]), aux->pathname)==0){
+						dir = cont->files[i];
+						found = 1;
+					}
+				} else {			//If file
+					struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, cont->files[i]);
+
+					char* name = (char*) malloc((strlen(aux->filename)+4));
+
+		    		strcat(name, aux->filename);
+		    		strcat(name, ".");
+		    		strcat(name, aux->extension);
+
+					//If its
+					if(strcmp(&(path[index+1]), name)){
+						dir = cont->files[i];
+						found = 1;
+					}
+				}
+			}
+			if(cont->next!=0x00000000){
+				cont = (struct tubercular_container*) read_tubercular_data(data, cont->next);
+			} else {
+				cont = NULL;
+			}
+		}
+	}
+	if(!found) return -ENOENT;
 				if(its_container(data, cont->files[i])){	//If container
 					struct tubercular_container_head* aux = (struct tubercular_container_head*) read_tubercular_data(data, cont->files[i]);
 					//If its
