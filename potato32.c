@@ -45,9 +45,6 @@ static uint8_t *read_tubercular_data(struct potato32 *data, uint32_t dir){
 		return NULL;
 	}
 
-	//Fill the next buffer with them
-	fseek(data->file, desired, SEEK_SET);
-
 	//Check next buffer to be filled
 	data->lastUsed+1 == BUFFER_ENTRIES ? data->lastUsed = 0 : data->lastUsed++ ;
 
@@ -55,8 +52,13 @@ static uint8_t *read_tubercular_data(struct potato32 *data, uint32_t dir){
 	if(data->buffer[data->lastUsed] == NULL){
 		data->buffer[data->lastUsed] = (struct tubercular_buffer*) malloc(sizeof(struct tubercular_buffer));
 	} else {
-		free(data->buffer[data->lastUsed]->data);
+		//Save on disc
+		fseek(data->file, tdrstart + (data->buffer[data->lastUsed]->data_dir)*BYTES_PER_CLUSTER, SEEK_SET);
+		fwrite(data->buffer[data->lastUsed]->data, sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
 	}
+
+	//Fill the next buffer with them
+	fseek(data->file, desired, SEEK_SET);
 
 	//Fill the buffer with the data
 	data->buffer[data->lastUsed]->data_dir = dir;
@@ -80,6 +82,25 @@ static unsigned its_empty(struct potato32 *data, uint32_t dir){
 
 	struct tubercular_use_entry tue = data->tut[entry];
 	return !((tue.info >> ((offset*2)))  & 0x01);
+}
+
+static void set_tue(struct potato32 *data, uint32_t dir, unsigned use, unsigned fold){
+	uint32_t entry = dir/4;
+	unsigned offset = dir%4;
+
+	struct tubercular_use_entry* tue = &(data->tut[entry]);
+
+	if(use){
+		tue->info |= 1UL << (offset*2);
+	} else {
+		tue->info &= ~(1UL << (offset*2));
+	}
+
+	if(fold){
+		tue->info |= 1UL << (offset*2+1);
+	} else {
+		tue->info &= ~(1UL << (offset*2+1));
+	}
 }
 
 static unsigned get_dir_of_container(struct potato32 *data, const char *dir, uint32_t* result){
@@ -376,8 +397,108 @@ static int p32_unlink(const char *path){
 	return 0;
 }
 static int p32_create(const char *path, mode_t mode, struct fuse_file_info *fi){
+	struct potato32 *data = (struct potato32* ) fuse_get_context()->private_data;
 
-	return 0;
+	//Look for an empty region
+	uint32_t used_dir = data->tfsi->first_free_tubercular_region;
+	struct potatoe_head* cr = (struct potatoe_head*) read_tubercular_data(data, data->tfsi->first_free_tubercular_region);
+	data->tfsi->free_tubercular_regions--;
+	data->tfsi->number_of_potatoes++;
+
+	//Set region tue
+	set_tue(data, used_dir, 1, 0);
+
+	//Look for next empty
+	while(!its_empty(data, data->tfsi->first_free_tubercular_region)) data->tfsi->first_free_tubercular_region++;
+
+	//Get path of previous folder
+	int index = strlen(path)-1;
+	while(index>=0 && path[index]!='/') index--;
+	if(index == -1) return -ENOENT;
+	char* fold = (char*) malloc((index+1)*sizeof(char));
+	strncpy(fold, path, index+1);
+
+	//Fill new potato
+	//Get extension
+	int ext = strlen(path)-1;
+	while(path[ext]!='.' && ext>=index){
+		ext--;
+	}
+	if(ext<index){
+		ext = strlen(path)-1;
+		cr->extension[0] = 't';
+		cr->extension[1] = 'x';
+		cr->extension[2] = 't';
+	} else {
+		strncpy(cr->extension, &(path[ext+1]), 3);
+	}
+	strncpy(cr->filename, &(path[index+1]), ext-index-1);
+	cr->filesize = 0;	//In bytes
+	cr->create_time = time(0);
+	cr->modify_time = time(0);
+	cr->acces_time = time(0);
+	cr->next = 0x00000000;
+
+
+	//Get that folder
+	uint32_t dir = 0;
+	if(get_dir_of_container(data, fold, &dir)) return -ENOENT;
+	struct tubercular_container_head* prev = (struct tubercular_container_head*) read_tubercular_data(data, dir);
+
+	//Look in head
+	unsigned found = 0;
+	dir = 0;
+	for(int i = 0; i<TUBERCULAR_CONTAINER_HEAD_PTRS && !found; i++){
+		//If its empty return enoent
+		if(prev->files[i]==0x00000000){
+			found = 1;
+			prev->files[i] = used_dir;
+			return 0;
+		}
+	}
+
+	//If not found look in extensions
+	if(!found && prev->next != 0x00000000){
+		struct tubercular_container* cont = (struct tubercular_container*) read_tubercular_data(data, prev->next);
+		while(cont!=NULL && !found){
+			//Iterate
+			for(int i = 0; i<TUBERCULAR_CONTAINER_PTRS && !found; i++){
+				//If its empty return enoent
+				if(cont->files[i]==0x00000000){
+					found = 1;
+					cont->files[i]= used_dir;
+					return 0;
+				}
+			}
+			if(cont->next!=0x00000000){
+				cont = (struct tubercular_container*) read_tubercular_data(data, cont->next);
+			} else {
+				//New empty region
+				struct tubercular_container* ncont = (struct tubercular_container*) read_tubercular_data(data, data->tfsi->first_free_tubercular_region);
+
+				//Set region tue
+				set_tue(data, data->tfsi->first_free_tubercular_region, 1, 1);
+
+				//Add as next
+				cont->next = data->tfsi->first_free_tubercular_region;
+
+				//Look for next empty
+				while(!its_empty(data, data->tfsi->first_free_tubercular_region)) data->tfsi->first_free_tubercular_region++;
+
+				//Format
+				ncont->files[0] = used_dir;
+				for(uint32_t i = 0; i<TUBERCULAR_CONTAINER_PTRS; i++){
+					ncont->files[0] = 0x00000000;
+				}
+
+				ncont->next = 0x00000000;
+
+				return 0;
+			}
+		}
+	}
+
+	return 1;
 }
 static int p32_rename(const char *from, const char *to){
 	return 0;
@@ -582,7 +703,7 @@ static struct fuse_operations fuse_ops = {
 	//.open 		=	p32_open,
 	//.write 		=	p32_write,
 	//.unlink 	=	p32_unlink,
-	//.create 	=	p32_create,
+	.create 	=	p32_create,
 	//.rename 	=	p32_rename,
 
 	.getattr 	=	p32_getattr,
