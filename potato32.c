@@ -338,11 +338,19 @@ static int p32_readdir(const char *dir, void *buff, fuse_fill_dir_t filler, off_
 			} else {
 				struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, head->files[pos]);
 
-				char* name = (char*) malloc((strlen(aux->filename)+4));
+				char* name;
+				fprintf(stderr, "-- Adding file %s.%s\n", aux->filename, aux->extension);
+				if(strlen(aux->extension)!=0){
+					name = (char*) malloc((strlen(aux->filename)+4));
 
-    			strcpy(name, aux->filename);
-    			strcpy(&name[strlen(aux->filename)], ".");
-    			strcpy(&name[strlen(aux->filename)+1], aux->extension);
+    				strcpy(name, aux->filename);
+    				strcpy(&name[strlen(aux->filename)], ".");
+    				strcpy(&name[strlen(aux->filename)+1], aux->extension);
+				} else {
+					name = (char*) malloc((strlen(aux->filename)));
+
+    				strcpy(name, aux->filename);
+				}
 
 				fprintf(stderr,"--- Adding file %s\n", name);
 				if(filler(buff, name, NULL, 0)!=0) return -ENOMEM;
@@ -364,9 +372,13 @@ static int p32_readdir(const char *dir, void *buff, fuse_fill_dir_t filler, off_
 						if(filler(buff, aux->pathname, NULL, 0)!=0) return -ENOMEM;
 					} else {
 						struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, head->files[pos]);
+
 						char* name = (char*) malloc((strlen(aux->filename)+4)*sizeof(char));
+
 						strcpy(name, (char*)&(aux->filename));
+						strcpy(&name[strlen(aux->filename)], ".");
 						strcpy(&name[strlen(name)-4], (char*)&(aux->extension));
+
 						if(filler(buff, name, NULL, 0)!=0) return -ENOMEM;
 						free(name);
 					}
@@ -425,14 +437,13 @@ static int p32_create(const char *path, mode_t mode, struct fuse_file_info *fi){
 		ext--;
 	}
 	if(ext<index){
-		ext = strlen(path)-1;
-		cr->extension[0] = 't';
-		cr->extension[1] = 'x';
-		cr->extension[2] = 't';
+		strcpy(cr->filename, &(path[index+1]));
 	} else {
 		strncpy(cr->extension, &(path[ext+1]), 3);
+
+		strncpy(cr->filename, &(path[index+1]), ext-index-1);
 	}
-	strncpy(cr->filename, &(path[index+1]), ext-index-1);
+
 	cr->filesize = 0;	//In bytes
 	cr->create_time = time(0);
 	cr->modify_time = time(0);
@@ -575,11 +586,19 @@ static int p32_getattr(const char *path, struct stat *stbuf){
 		} else {			//If file
 			struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, prev->files[i]);
 
-			char* name = (char*) malloc((strlen(aux->filename)+3));
+			char* name;
+		
+			if(strlen(aux->extension)!=0){
+				name = (char*) malloc((strlen(aux->filename)+4));
 
-    		strcpy(name, aux->filename);
-    		strcpy(&name[strlen(aux->filename)], ".");
-    		strcpy(&name[strlen(aux->filename)+1], aux->extension);
+    			strcpy(name, aux->filename);
+    			strcpy(&name[strlen(aux->filename)], ".");
+    			strcpy(&name[strlen(aux->filename)+1], aux->extension);
+			} else {
+				name = (char*) malloc((strlen(aux->filename)));
+
+    			strcpy(name, aux->filename);
+			}
 			//If its
 			fprintf(stderr, "-- Comparing %s & %s \n", &(path[index+1]), name);
 			if(strcmp(&(path[index+1]), name) == 0){
