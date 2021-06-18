@@ -225,11 +225,20 @@ static unsigned look_inside_for(struct potato32 *data, const char *lfname, const
 		} else {			//If file
 			struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, prev->files[i]);
 
-			char* name = (char*) malloc((strlen(aux->filename)+3));
+			char* name;
 
-    		strcpy(name, aux->filename);
-    		strcpy(&name[strlen(aux->filename)], ".");
-    		strcpy(&name[strlen(aux->filename)+1], aux->extension);
+			if(strlen(aux->extension)!=0){
+				name = (char*) malloc((strlen(aux->filename)+4));
+
+    			strcpy(name, aux->filename);
+    			strcpy(&name[strlen(aux->filename)], ".");
+    			strcpy(&name[strlen(aux->filename)+1], aux->extension);
+			} else {
+				name = (char*) malloc((strlen(aux->filename)));
+
+    			strcpy(name, aux->filename);
+			}
+
 			//If its
 			fprintf(stderr, "-- Comparing %s & %s \n", lfname, name);
 			if(strcmp(lfname, name) == 0){
@@ -262,11 +271,19 @@ static unsigned look_inside_for(struct potato32 *data, const char *lfname, const
 				} else {			//If file
 					struct potatoe_head* aux = (struct potatoe_head*) read_tubercular_data(data, cont->files[i]);
 
-					char* name = (char*) malloc((strlen(aux->filename)+4));
+					char* name;
 
-		    		strcat(name, aux->filename);
-		    		strcat(name, ".");
-		    		strcat(name, aux->extension);
+					if(strlen(aux->extension)!=0){
+						name = (char*) malloc((strlen(aux->filename)+4));
+
+		    			strcpy(name, aux->filename);
+		    			strcpy(&name[strlen(aux->filename)], ".");
+		    			strcpy(&name[strlen(aux->filename)+1], aux->extension);
+					} else {
+						name = (char*) malloc((strlen(aux->filename)));
+
+		    			strcpy(name, aux->filename);
+					}
 
 					//If its
 					if(strcmp(lfname, name)){
@@ -596,6 +613,73 @@ static int p32_create(const char *path, mode_t mode, struct fuse_file_info *fi){
 	return 1;
 }
 static int p32_rename(const char *from, const char *to){
+	struct potato32 *data = (struct potato32* ) fuse_get_context()->private_data;
+
+	int indexf = strlen(from)-1;
+	int indext = strlen(to)-1;
+
+	while(indexf>=0 && from[indexf]!='/') indexf--;
+	while(indext>=0 && to[indext]!='/') indext--;
+
+	if(indexf<0 || indext<0) return -ENOENT;
+
+	char* foldf = (char*)malloc(sizeof(char)*(indexf+1));
+	char* foldt = (char*)malloc(sizeof(char)*(indext+1));
+	strncpy(foldf, from, indexf+1);
+	strncpy(foldt, to, indext+1);
+
+	fprintf(stderr, "- Got folders\n");
+
+	struct potatoe_head* ph;
+	//Check if we stay in the same folder
+	if(strcmp(foldt, foldf)==0){	//Same folder
+		fprintf(stderr, "- Same folder: %s && %s\n", foldf, foldt);
+		//Get container dir
+		uint32_t contdir = 0;
+		if(get_dir_of_container(data, foldf, &contdir)) return -ENOENT;
+		fprintf(stderr, "- Got container\n");
+		//Get file dir
+		uint32_t file = 0;
+		if(look_inside_for(data, &(from[indexf+1]), contdir, &file)) return -ENOENT;
+
+		fprintf(stderr, "- Got file dir\n");
+
+		//Get file
+		ph = (struct potatoe_head*) read_tubercular_data(data, file);
+		fprintf(stderr, "- Got file\n");
+	} else {						//Different folder
+		fprintf(stderr, "- Different folder\n");
+		//Get old container dir
+		uint32_t contdir = 0;
+		if(get_dir_of_container(data, foldf, &contdir)) return -ENOENT;
+
+		//Get file dir
+		uint32_t file = 0;
+		if(look_inside_for(data, &(from[indexf+1]),contdir, &file)) return -ENOENT;
+
+		//Remove from old dir
+
+		//Get new container dir
+
+		//Put new dir
+
+	}
+
+	//Get extensions and change name and extension
+	int newext = strlen(to);
+	while(newext>indext && to[newext]!='.') newext--;
+	if(newext==indext){	//No extension
+		fprintf(stderr, "- No extension\n");
+		strcpy(ph->filename, &(to[indext+1]));
+		ph->filename[strlen(to)-indext-1] = '\0';
+		ph->extension[0] = '\0';
+	} else {
+		fprintf(stderr, "- With extension\n");
+		strncpy(ph->filename, &(to[indext+1]), newext-indext-1);
+		ph->filename[newext-indext-1] = '\0';
+		strcpy(ph->extension, &(to[newext+1]));
+	}
+
 	return 0;
 }
 
@@ -807,7 +891,7 @@ static struct fuse_operations fuse_ops = {
 	//.write 		=	p32_write,
 	//.unlink 	=	p32_unlink,
 	.create 	=	p32_create,
-	//.rename 	=	p32_rename,
+	.rename 	=	p32_rename,
 
 	.getattr 	=	p32_getattr,
 	//.setattr 	=	p32_setattr,
