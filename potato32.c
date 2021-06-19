@@ -306,6 +306,88 @@ static unsigned look_inside_for(struct potato32 *data, const char *lfname, const
 	return 0;
 }
 
+static unsigned remove_val_from_dir(struct potato32 *data, uint32_t val, uint32_t dir){
+	//Get dir
+	struct tubercular_container_head* tch = (struct tubercular_container_head*) read_tubercular_data(data, dir);
+	struct tubercular_container* bodyrm = NULL;
+	struct tubercular_container* bodyrp = NULL;
+
+	//Look for the index to remove on the head
+	int rmindex = -1;
+	for(int i = 0; i<TUBERCULAR_CONTAINER_HEAD_PTRS && rmindex == -1; i++){
+		if(tch->files[i]==val) rmindex = i;
+	}
+
+	//Must be in the body
+	if(rmindex == -1){
+		if(tch->next == 0x00000000) return 1;
+		bodyrm = (struct tubercular_container*) read_tubercular_data(data, tch->next);
+		while(rmindex == -1){
+			for(int i = 0; i<TUBERCULAR_CONTAINER_PTRS && rmindex == -1; i++){
+				if(bodyrm->files[i]==val) rmindex = i;
+			}
+			if(rmindex==-1){
+				if(bodyrm->next == 0x00000000){
+					return 1;
+				} else {
+					bodyrm = (struct tubercular_container*) read_tubercular_data(data, bodyrm->next);
+				}
+			}
+		}
+	}
+
+	//RM dir already found
+	//LF RP dir
+	int rpindex = -2;
+
+	//Check on head if found on head
+	if(bodyrm==NULL){
+		for(int i = rmindex+1; i<TUBERCULAR_CONTAINER_HEAD_PTRS && rpindex == -2; i++){
+			if(tch->files[i]==0x00000000) rpindex = i-1;
+		}
+	}
+
+	//If still not found, start looking on body
+	if(rpindex==-2){
+		if(bodyrm == NULL){
+			bodyrp = (struct tubercular_container*) read_tubercular_data(data, tch->next);
+		} else {
+			bodyrp = (struct tubercular_container*) bodyrm;
+		}
+
+		while(rpindex == -2){
+			for(int i = 0; i<TUBERCULAR_CONTAINER_PTRS && rpindex == -2; i++){
+				if(bodyrp->files[i]==val) rpindex = i;
+			}
+			if(rpindex==-2){
+				if(bodyrp->next == 0x00000000){
+					rpindex = TUBERCULAR_CONTAINER_PTRS-1;
+				} else {
+					bodyrp = (struct tubercular_container*) read_tubercular_data(data, bodyrp->next);
+				}
+			}
+		}
+	}
+
+	uint32_t newval = 0;
+	//Replace from body
+	if(bodyrp == NULL){
+		newval = tch->files[rpindex];
+		tch->files[rpindex] = 0;
+	} else {
+		newval = bodyrp->files[rpindex];
+		bodyrp->files[rpindex] = 0;
+	}
+
+	if(bodyrm == NULL){
+		tch->files[rmindex] = newval;
+	} else {
+		bodyrm->files[rmindex] = newval;
+	}
+
+	return 0;
+}
+
 //////////////////////////////////////
 //			Core functions			//
 //////////////////////////////////////
@@ -656,12 +738,73 @@ static int p32_rename(const char *from, const char *to){
 		//Get file dir
 		uint32_t file = 0;
 		if(look_inside_for(data, &(from[indexf+1]),contdir, &file)) return -ENOENT;
+		ph = (struct potatoe_head*) read_tubercular_data(data, file);
 
 		//Remove from old dir
+		if(remove_val_from_dir(data, file, contdir)) return -ENOENT;
 
 		//Get new container dir
+		uint32_t ncontdir = 0;
+		if(get_dir_of_container(data, foldt, &ncontdir)) return -ENOENT;
 
 		//Put new dir
+		struct tubercular_container_head* nhead = (struct tubercular_container_head*) read_tubercular_data(data, ncontdir);
+
+		unsigned put = 0;
+
+		//Insert in head
+		for(int i = 0; i<TUBERCULAR_CONTAINER_HEAD_PTRS && !put; i++){
+			if(nhead->files[i]==0x00000000){
+				put = 1;
+				nhead->files[i] = file;
+			}
+		}
+
+		//Insert in created body
+		if(!put && nhead->next!=0x00000000){
+			struct tubercular_container* nbody = (struct tubercular_container*) read_tubercular_data(data, nhead->next);
+			while(!put && nbody!=NULL){
+				for(int i = 0; i<TUBERCULAR_CONTAINER_PTRS && !put; i++){
+					if(nbody->files[i]==0x00000000){
+						put = 1;
+						nbody->files[i] = file;
+					}
+				}
+				if(!put){
+					if(nbody->next == 0x00000000) nbody = NULL;
+					else nbody = (struct tubercular_container*) read_tubercular_data(data, nbody->next);
+				}
+			}
+		}
+
+		//Could not insert in any created body
+		if(!put){
+			uint32_t* ptr;
+			if(nhead->next == 0x00000000) ptr = &(nhead->next);
+			else{
+				struct tubercular_container* nbody = (struct tubercular_container*) read_tubercular_data(data, nhead->next);
+				while(nbody->next!=0x00000000){
+					nbody = (struct tubercular_container*) read_tubercular_data(data, nbody->next);
+				}
+				ptr = &(nbody->next);
+			}
+
+			//Get free direction and lf next one
+			*ptr = data->tfsi->first_free_tubercular_region;
+			data->tfsi->first_free_tubercular_region++;
+			while(!its_empty(data, data->tfsi->first_free_tubercular_region)) data->tfsi->first_free_tubercular_region++;
+
+			//Change TUT entry
+			set_tue(data, *ptr, 1, 0);
+
+			//Format new dir
+			struct tubercular_container* cont = (struct tubercular_container*) read_tubercular_data(data, *ptr);
+			cont->next = 0x00000000;
+			cont->files[0] = file;
+			for(int i = 1; i<TUBERCULAR_CONTAINER_PTRS; i++){
+				cont->files[i] = 0x00000000;
+			}
+		}
 
 	}
 
