@@ -713,6 +713,7 @@ static int p32_rename(const char *from, const char *to){
 	fprintf(stderr, "- Got folders\n");
 
 	struct potatoe_head* ph;
+	uint32_t file;
 	//Check if we stay in the same folder
 	if(strcmp(foldt, foldf)==0){	//Same folder
 		fprintf(stderr, "- Same folder: %s && %s\n", foldf, foldt);
@@ -721,7 +722,7 @@ static int p32_rename(const char *from, const char *to){
 		if(get_dir_of_container(data, foldf, &contdir)) return -ENOENT;
 		fprintf(stderr, "- Got container\n");
 		//Get file dir
-		uint32_t file = 0;
+		file = 0;
 		if(look_inside_for(data, &(from[indexf+1]), contdir, &file)) return -ENOENT;
 
 		fprintf(stderr, "- Got file dir\n");
@@ -736,7 +737,7 @@ static int p32_rename(const char *from, const char *to){
 		if(get_dir_of_container(data, foldf, &contdir)) return -ENOENT;
 
 		//Get file dir
-		uint32_t file = 0;
+		file = 0;
 		if(look_inside_for(data, &(from[indexf+1]),contdir, &file)) return -ENOENT;
 		ph = (struct potatoe_head*) read_tubercular_data(data, file);
 
@@ -808,19 +809,25 @@ static int p32_rename(const char *from, const char *to){
 
 	}
 
-	//Get extensions and change name and extension
-	int newext = strlen(to);
-	while(newext>indext && to[newext]!='.') newext--;
-	if(newext==indext){	//No extension
-		fprintf(stderr, "- No extension\n");
-		strcpy(ph->filename, &(to[indext+1]));
-		ph->filename[strlen(to)-indext-1] = '\0';
-		ph->extension[0] = '\0';
+	if(its_container(data, file)){
+		struct tubercular_container_head* tchr = (struct tubercular_container_head*) read_tubercular_data(data, file);
+
+		strcpy(tchr->pathname, &(to[indext+1]));
 	} else {
-		fprintf(stderr, "- With extension\n");
-		strncpy(ph->filename, &(to[indext+1]), newext-indext-1);
-		ph->filename[newext-indext-1] = '\0';
-		strcpy(ph->extension, &(to[newext+1]));
+		//Get extensions and change name and extension
+		int newext = strlen(to);
+		while(newext>indext && to[newext]!='.') newext--;
+		if(newext==indext){	//No extension
+			fprintf(stderr, "- No extension\n");
+			strcpy(ph->filename, &(to[indext+1]));
+			ph->filename[strlen(to)-indext-1] = '\0';
+			ph->extension[0] = '\0';
+		} else {
+			fprintf(stderr, "- With extension\n");
+			strncpy(ph->filename, &(to[indext+1]), newext-indext-1);
+			ph->filename[newext-indext-1] = '\0';
+			strcpy(ph->extension, &(to[newext+1]));
+		}
 	}
 
 	return 0;
