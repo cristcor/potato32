@@ -251,8 +251,8 @@ static unsigned look_inside_for(struct potato32 *data, const char *lfname, const
 	}
 
 	//If not found look in extensions
-	fprintf(stderr, "- Looking inside bodies\n");
 	if(!found && prev->next != 0x00000000){
+		fprintf(stderr, "- Looking inside bodies\n");
 		struct tubercular_container* cont = (struct tubercular_container*) read_tubercular_data(data, prev->next);
 		while(cont!=NULL && !found){
 			//Iterate
@@ -380,9 +380,11 @@ static unsigned remove_val_from_dir(struct potato32 *data, uint32_t val, uint32_
 	}
 
 	if(bodyrm == NULL){
-		tch->files[rmindex] = newval;
+		if(tch->files[rmindex] == newval) tch->files[rmindex] = 0x00000000;
+		else tch->files[rmindex] = newval;
 	} else {
-		bodyrm->files[rmindex] = newval;
+		if(bodyrm->files[rmindex] == newval) bodyrm->files[rmindex] = 0x00000000;
+		else bodyrm->files[rmindex] = newval;
 	}
 
 	return 0;
@@ -491,6 +493,24 @@ static int p32_mkdir(const char *path, mode_t mode){
 }
 
 static int p32_rmdir(const char *dir){
+	struct potato32 *data = (struct potato32* ) fuse_get_context()->private_data;
+
+	//Get containing folder
+	int index = strlen(dir)-1;
+	while(index>=0 && dir[index]!='/') index--;
+	if(index<0) return -ENOENT;
+	char* fold = (char*)malloc(sizeof(char)*(index+1));
+	strncpy(fold, dir, index+1);
+	fprintf(stderr, "Removing from %s\n", fold);
+
+	uint32_t container =0;
+	if(get_dir_of_container(data, fold, &container)) return -ENOENT;
+
+	uint32_t dcontainer = 0;
+	if(look_inside_for(data, &(dir[index+1]), container, &dcontainer)) return -ENOENT;
+
+	if(remove_val_from_dir(data, dcontainer, container)) return -ENOENT;
+
 	return 0;
 }
 static int p32_readdir(const char *dir, void *buff, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi){
@@ -589,6 +609,24 @@ static int p32_write(const char *path, const char *buffer, size_t size, off_t of
 	return 0;
 }
 static int p32_unlink(const char *path){
+	struct potato32 *data = (struct potato32* ) fuse_get_context()->private_data;
+
+	//Get containing folder
+	int index = strlen(path)-1;
+	while(index>=0 && path[index]!='/') index--;
+	if(index<0) return -ENOENT;
+	char* fold = (char*)malloc(sizeof(char)*(index+1));
+	strncpy(fold, path, index+1);
+	fprintf(stderr, "Removing from %s\n", fold);
+
+	uint32_t container =0;
+	if(get_dir_of_container(data, fold, &container)) return -ENOENT;
+
+	uint32_t dcontainer = 0;
+	if(look_inside_for(data, &(path[index+1]), container, &dcontainer)) return -ENOENT;
+
+	if(remove_val_from_dir(data, dcontainer, container)) return -ENOENT;
+
 	return 0;
 }
 static int p32_create(const char *path, mode_t mode, struct fuse_file_info *fi){
@@ -1033,13 +1071,13 @@ static struct fuse_operations fuse_ops = {
 	//.destroy	=	p32_destroy,
 
 	.mkdir		=	p32_mkdir,
-	//.rmdir		=	p32_rmdir,
+	.rmdir		=	p32_rmdir,
 	.readdir	=	p32_readdir,
 
 	//.read 		=	p32_read,
 	//.open 		=	p32_open,
 	//.write 		=	p32_write,
-	//.unlink 	=	p32_unlink,
+	.unlink 	=	p32_unlink,
 	.create 	=	p32_create,
 	.rename 	=	p32_rename,
 
