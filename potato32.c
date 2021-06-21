@@ -286,7 +286,7 @@ static unsigned look_inside_for(struct potato32 *data, const char *lfname, const
 					}
 
 					//If its
-					if(strcmp(lfname, name)){
+					if(!strcmp(lfname, name)){
 						dir = cont->files[i];
 						found = 1;
 					}
@@ -994,7 +994,7 @@ static int p32_getattr(const char *path, struct stat *stbuf){
 		    		strcat(name, aux->extension);
 
 					//If its
-					if(strcmp(&(path[index+1]), name)){
+					if(!strcmp(&(path[index+1]), name)){
 						dir = cont->files[i];
 						found = 1;
 					}
