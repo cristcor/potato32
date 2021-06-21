@@ -619,6 +619,23 @@ static int p32_read(const char *path, char *buffer, size_t size, off_t offset, s
 	return 0;
 }
 static int p32_open(const char *path, struct fuse_file_info *fi){
+	struct potato32 *data = (struct potato32* ) fuse_get_context()->private_data;
+
+	int index = strlen(path)-1;
+	while(path[index]!='/' && index>=0) index--;
+	if(index<0) return -ENOENT;
+
+	char* str = (char*) malloc(strlen(path)-index);
+	strcpy(str, &(path[index+1]));
+
+	char* fold = (char*) malloc(index+1);
+	strncpy(str, path, index+1);
+
+	uint32_t folddir = 0;
+	uint32_t filedir = 0;
+	if(get_dir_of_container(data, fold, &folddir)) return -ENOENT;
+	if(look_inside_for(data, str, folddir, &filedir)) return -ENOENT;
+
 	return 0;
 }
 static int p32_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi){
@@ -1091,7 +1108,7 @@ static struct fuse_operations fuse_ops = {
 	.readdir	=	p32_readdir,
 
 	//.read 		=	p32_read,
-	//.open 		=	p32_open,
+	.open 		=	p32_open,
 	//.write 		=	p32_write,
 	.unlink 	=	p32_unlink,
 	.create 	=	p32_create,
