@@ -54,7 +54,7 @@ static uint8_t *read_tubercular_data(struct potato32 *data, uint32_t dir){
 	} else {
 		//Save on disc
 		fseek(data->file, tdrstart + (data->buffer[data->lastUsed]->data_dir)*BYTES_PER_CLUSTER, SEEK_SET);
-		fwrite(data->buffer[data->lastUsed]->data, sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
+		fwrite(&data->buffer[data->lastUsed]->data, sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
 	}
 
 	//Fill the next buffer with them
@@ -65,7 +65,7 @@ static uint8_t *read_tubercular_data(struct potato32 *data, uint32_t dir){
 	fread(data->buffer[data->lastUsed]->data, sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
 
 	//Return data
-	return data->buffer[data->lastUsed]->data;
+	return &data->buffer[data->lastUsed]->data;
 }
 
 static unsigned its_container(struct potato32 *data, uint32_t dir){
@@ -415,7 +415,30 @@ static void *p32_init(struct fuse_conn_info *conn){
 	return data;
 }
 static void p32_destroy(void *private_data){
+	struct potato32 *data = (struct potato32* ) fuse_get_context()->private_data;
 
+	//Reset ptr
+	fseek(data->file, 0, SEEK_SET);
+
+	//Save TFSI
+	fprintf(stderr, "Saving TFSI\n");
+	fwrite(&data->tfsi, sizeof(struct tubercular_file_system_information), 1, data->file);
+
+	//Save TUT
+	fprintf(stderr, "Saving TUT\n");
+	fwrite(&data->tut, sizeof(struct tubercular_use_entry), pow(2, ADDRESS_BITS)/4, data->file);
+
+	//Save all the buffers
+	fprintf(stderr, "Saving buffers\n");
+	long int tdrstart = sizeof(struct tubercular_file_system_information)+
+		(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4));
+
+	for(unsigned i = 0; i<BUFFER_ENTRIES; i++){
+		fseek(data->file, tdrstart + (data->buffer[i]->data_dir)*BYTES_PER_CLUSTER, SEEK_SET);
+		fwrite(&data->buffer[i]->data, sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
+	}
+
+	fclose(data->file);
 }
 
 //////////////////////////////////////
@@ -1101,7 +1124,7 @@ static int p32_getattr(const char *path, struct stat *stbuf){
 //////////////////////////////////////
 static struct fuse_operations fuse_ops = {
 	.init 		=	p32_init,
-	//.destroy	=	p32_destroy,
+	.destroy	=	p32_destroy,
 
 	.mkdir		=	p32_mkdir,
 	.rmdir		=	p32_rmdir,
@@ -1296,7 +1319,7 @@ int main(int argc, char *argv[])
         //Reading TFSI
         printf("-- Reading Tubercular File System Information\n");
         data->tfsi = (struct tubercular_file_system_information*) malloc(sizeof(struct tubercular_file_system_information));
-        tam = fread(data->tfsi, sizeof(struct tubercular_file_system_information*), 1, fp);
+        tam = fread(data->tfsi, sizeof(struct tubercular_file_system_information), 1, fp);
         //printf("--- %lu of %lu bytes\n\n", tam*sizeof(struct tubercular_file_system_information), sizeof(struct tubercular_file_system_information));
         
         if(tam!= 1/*sizeof(struct tubercular_file_system_information)*/){
