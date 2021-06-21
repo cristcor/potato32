@@ -103,9 +103,25 @@ static void set_tue(struct potato32 *data, uint32_t dir, unsigned use, unsigned 
 	}
 }
 
-static unsigned get_dir_of_container(struct potato32 *data, const char *dir, uint32_t* result){
-	fprintf(stderr, "- Looking for container %s\n", dir);
-	if(strcmp(dir, "/")==0){
+static unsigned isASCII(char *dir, unsigned pos){
+	if( !((dir[pos]>='a' && dir[pos]<='z') || (dir[pos]>='A' && dir[pos]<='Z')) ){
+		return 0;
+	}
+	return 1;
+}
+
+static unsigned get_dir_of_container(struct potato32 *data, const char *odir, uint32_t* result){
+	char *dir = (char*) malloc(strlen(odir));
+	strcpy(dir, odir);
+	fprintf(stderr, "- Looking for container %s with length %ld\n", dir, strlen(dir));
+
+	unsigned auxindex = strlen(odir)-1;
+	while(!isASCII(dir, auxindex) && auxindex>0){
+		dir[auxindex]='\0';
+		auxindex--;
+	}
+	
+	if(strcmp(dir, "/")==0 || (dir[0]=='/' && dir[1] == '\0')){
 		fprintf(stderr, "-- Looking for root direction\n");
 		*result = 0x00000000;
 		return 0;
@@ -819,13 +835,13 @@ static int p32_rename(const char *from, const char *to){
 		//Could not insert in any created body
 		if(!put){
 			uint32_t* ptr;
-			if(nhead->next == 0x00000000) ptr = &(nhead->next);
+			if(nhead->next == 0x00000000) ptr = (uint32_t*) &(nhead->next);
 			else{
 				struct tubercular_container* nbody = (struct tubercular_container*) read_tubercular_data(data, nhead->next);
 				while(nbody->next!=0x00000000){
 					nbody = (struct tubercular_container*) read_tubercular_data(data, nbody->next);
 				}
-				ptr = &(nbody->next);
+				ptr = (uint32_t*) &(nbody->next);
 			}
 
 			//Get free direction and lf next one
@@ -918,7 +934,7 @@ static int p32_getattr(const char *path, struct stat *stbuf){
 	fprintf(stderr, "- Getting memory address\n");
 	uint32_t dir = 0;
 	if(get_dir_of_container(data, fold, &dir)) return -ENOENT;
-	fprintf(stderr, "- Got %lu\n", dir);
+	fprintf(stderr, "- Got %u\n", dir);
 	struct tubercular_container_head* prev = (struct tubercular_container_head*) read_tubercular_data(data, dir);
 
 	//Look in head
@@ -1350,8 +1366,8 @@ int main(int argc, char *argv[])
     }
     
     if(root->files[0] != 0x00000001 || root->files[1] != 0x00000002){
-    	printf("-- Pointer 1: %lu\n", root->files[0]);
-    	printf("-- Pointer 2: %lu\n", root->files[1]);
+    	printf("-- Pointer 1: %u\n", root->files[0]);
+    	printf("-- Pointer 2: %u\n", root->files[1]);
     	printf("-- Incorrect pointers, error\n\n");
     	return -1;
     }

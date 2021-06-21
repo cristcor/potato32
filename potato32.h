@@ -68,23 +68,23 @@ struct potatoe_head{
 	uint8_t data[POTATOE_HEAD_DATA_BYTES];
 	//Next ptr
 	uint32_t next;
-}  __attribute__ ((__packed__)); // no Padding
+};  //__attribute__ ((__packed__)); // no Padding
 
 struct potatoe{
 	uint8_t data[POTATOE_DATA_BYTES];
 	uint32_t next;
-}  __attribute__ ((__packed__)); // no Padding
+};  //__attribute__ ((__packed__)); // no Padding
 
 struct tubercular_container_head{
 	char pathname[NAME_CHAR_LENGTH];
 	uint32_t files[TUBERCULAR_CONTAINER_HEAD_PTRS];
 	uint32_t next;
-}  __attribute__ ((__packed__)); // no Padding
+};  //__attribute__ ((__packed__)); // no Padding
 
 struct tubercular_container{
 	uint32_t files[TUBERCULAR_CONTAINER_PTRS];
 	uint32_t next;
-}  __attribute__ ((__packed__)); // no Padding
+};  //__attribute__ ((__packed__)); // no Padding
 
 ////////////////////////////////////////
 //		  BUFFER TUBERCULAR STRUCT	  //
