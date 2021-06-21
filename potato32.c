@@ -433,7 +433,11 @@ static void p32_destroy(void *private_data){
 
 	//Save TUT
 	fprintf(stderr, "Saving TUT\n");
-	fwrite(&data->tut, sizeof(struct tubercular_use_entry), pow(2, ADDRESS_BITS)/4, data->file);
+	unsigned tuttam = 0;
+	tuttam = fwrite(&data->tut, sizeof(struct tubercular_use_entry), pow(2, ADDRESS_BITS)/4, data->file);
+	if(tuttam != pow(2, ADDRESS_BITS)/4){
+		fprintf(stderr, "Only %u units got written!\n", tuttam);
+	}
 
 	//Save all the buffers
 	fprintf(stderr, "Saving buffers\n");
@@ -442,8 +446,12 @@ static void p32_destroy(void *private_data){
 
 	for(unsigned i = 0; i<BUFFER_ENTRIES; i++){
 		if(data->buffer[i] == NULL) break;
+		fprintf(stderr, "Writing buffer %d with TDR address %u and local address %lu\n", i, data->buffer[i]->data_dir, 
+			tdrstart + (data->buffer[i]->data_dir)*BYTES_PER_CLUSTER);
 		fseek(data->file, tdrstart + (data->buffer[i]->data_dir)*BYTES_PER_CLUSTER, SEEK_SET);
-		fwrite(&(data->buffer[i]->data), sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
+		unsigned tam = 0;
+		tam = fwrite(&(data->buffer[i]->data), sizeof(uint8_t), (MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES), data->file);
+		if(tam!=MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES) fprintf(stderr, "Only %u bytes got written!\n", tam);
 	}
 
 	fclose(data->file);
@@ -1194,7 +1202,7 @@ int main(int argc, char *argv[])
         
         //Create a file with that size, fill it and close
         printf("- Allocating image...\n");
-        FILE *fp = fopen("blankimage", "w");
+        FILE *fp = fopen("blankimage", "w+");
         fseek(fp, size , SEEK_SET);
         fseek(fp, 0, SEEK_SET);
 
@@ -1325,10 +1333,10 @@ int main(int argc, char *argv[])
         data->imagepath = strdup(argv[argc-2]);
 
         printf("- Reading file: %s\n", data->imagepath);
-        FILE *fp = fopen(data->imagepath, "r");
+        FILE *fp = fopen(data->imagepath, "r+");
 
         //Reading TFSI
-        printf("-- Reading Tubercular File System Information\n");
+        printf("-- Reading Tubercular File System Information from %lu\n", ftell(fp));
         data->tfsi = (struct tubercular_file_system_information*) malloc(sizeof(struct tubercular_file_system_information));
         tam = fread(data->tfsi, sizeof(struct tubercular_file_system_information), 1, fp);
         //printf("--- %lu of %lu bytes\n\n", tam*sizeof(struct tubercular_file_system_information), sizeof(struct tubercular_file_system_information));
@@ -1342,12 +1350,11 @@ int main(int argc, char *argv[])
         }
 
         //Reading TUT
-        printf("-- Reading Tubercular Use Table\n");
+        printf("-- Reading Tubercular Use Table from %lu\n", ftell(fp));
         data->tut = (struct tubercular_use_entry*) malloc(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4));
         tam = fread(data->tut, sizeof(struct tubercular_use_entry), (pow(2, ADDRESS_BITS))/4, fp);
-        //printf("--- %lu of %d bytes\n\n", tam*sizeof(struct tubercular_use_entry), ((pow(2, ADDRESS_BITS))/4));
 
-        if(tam!=/*sizeof(struct tubercular_use_entry)*/((pow(2, ADDRESS_BITS))/4)){
+        if(tam!=((pow(2, ADDRESS_BITS))/4)){
             printf("--- Error reading first entry of Tubercular Use Table\n");
             if(feof(fp)) printf("--- End Of File\n");
             else if(ferror(fp)) printf("--- Error\n");
@@ -1356,7 +1363,7 @@ int main(int argc, char *argv[])
         }
 
         //Read Root
-        printf("-- Reading Root Tubercular Container\n");
+        printf("-- Reading Root Tubercular Container from %lu\n", ftell(fp));
         tam = fread(root, sizeof(struct tubercular_container_head), 1, fp);
         //printf("--- %lu of %lu bytes\n\n", tam*sizeof(struct tubercular_container_head), sizeof(struct tubercular_container_head));
 
@@ -1390,7 +1397,7 @@ int main(int argc, char *argv[])
     printf("-- Number of Potatoes: %d\n", data->tfsi->number_of_potatoes);
     printf("-- Number of Tubercular Containers: %d\n\n", data->tfsi->number_of_tubercular_containers);
 
-    data->file=fopen(data->imagepath, "rw");
+    data->file=fopen(data->imagepath, "rw+");
     data->time = time(0);
 
     //Check if the first Tubercular Data Region is the root
@@ -1424,6 +1431,11 @@ int main(int argc, char *argv[])
     }
 
     printf("-- Integrity checking passed\n\n");
+
+    printf("- Checking test folder integrity...\n");
+    if(!its_container(data, 0x00000001)) printf("- Mem 1 is not a folder...\n");
+    if(!its_container(data, 0x00000002)) printf("- Mem 2 is not a folder...\n");
+
 
     printf("- Starting FUSE\n");
 
