@@ -14,13 +14,16 @@
 //			Aux functions			//
 //////////////////////////////////////
 static uint8_t *read_tubercular_data(struct potato32 *data, uint32_t dir){
+	fprintf(stderr, "---- Looking for TDR position %u\n", dir);
 	int res = 0;
 	//Check buffers
 	for(unsigned i = 0; i<BUFFER_ENTRIES; i++){
 		//If is NULL stop check
 		if(data->buffer[i]==NULL) break;
+		fprintf(stderr, "---- Checking buffer %d with address %u\n", i, data->buffer[i]->data_dir);
 		//If is inside that buffer
-		else if(data->buffer[i]->data_dir <= dir && data->buffer[i]->data_dir + (MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES) > dir ){
+		if(data->buffer[i]->data_dir <= dir && data->buffer[i]->data_dir + (MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES) > dir ){
+			fprintf(stderr, "---- Returning\n");
 			//Return the buffer data + (diference in clusters between desired dir and buffer init)*size of cluster
 			data->lastUsed = i;
 			return data->buffer[i]->data + (dir - data->buffer[i]->data_dir)*BYTES_PER_CLUSTER;
@@ -46,26 +49,30 @@ static uint8_t *read_tubercular_data(struct potato32 *data, uint32_t dir){
 	}
 
 	//Check next buffer to be filled
-	data->lastUsed+1 == BUFFER_ENTRIES ? data->lastUsed = 0 : data->lastUsed++ ;
+	if(!(data->buffer[data->lastUsed] == NULL)) data->lastUsed = (data->lastUsed==BUFFER_ENTRIES-1 ? data->lastUsed = 0 : data->lastUsed++);
 
 	//Initialize that buffer if it has been never used
 	if(data->buffer[data->lastUsed] == NULL){
+		fprintf(stderr, "---- Creating empty buffer %d with address %u\n", data->lastUsed, dir);
 		data->buffer[data->lastUsed] = (struct tubercular_buffer*) malloc(sizeof(struct tubercular_buffer));
 	} else {
 		//Save on disc
+		fprintf(stderr, "---- Saving buffer %d with address %u\n", data->lastUsed, dir);
 		fseek(data->file, tdrstart + (data->buffer[data->lastUsed]->data_dir)*BYTES_PER_CLUSTER, SEEK_SET);
 		fwrite(&data->buffer[data->lastUsed]->data, sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
 	}
 
-	//Fill the next buffer with them
+	//Move to the read position
 	fseek(data->file, desired, SEEK_SET);
 
 	//Fill the buffer with the data
+	fprintf(stderr, "---- Filling buffer...\n");
+
 	data->buffer[data->lastUsed]->data_dir = dir;
 	fread(data->buffer[data->lastUsed]->data, sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
 
 	//Return data
-	return &data->buffer[data->lastUsed]->data;
+	return &(data->buffer[data->lastUsed]->data);
 }
 
 static unsigned its_container(struct potato32 *data, uint32_t dir){
@@ -434,11 +441,15 @@ static void p32_destroy(void *private_data){
 		(sizeof(struct tubercular_use_entry)*((pow(2, ADDRESS_BITS))/4));
 
 	for(unsigned i = 0; i<BUFFER_ENTRIES; i++){
+		if(data->buffer[i] == NULL) break;
 		fseek(data->file, tdrstart + (data->buffer[i]->data_dir)*BYTES_PER_CLUSTER, SEEK_SET);
-		fwrite(&data->buffer[i]->data, sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
+		fwrite(&(data->buffer[i]->data), sizeof(uint8_t), MAX_CLUSTERS_ON_MEMORY/BUFFER_ENTRIES, data->file);
 	}
 
 	fclose(data->file);
+
+
+	fprintf(stderr, "Bye!\n");
 }
 
 //////////////////////////////////////
